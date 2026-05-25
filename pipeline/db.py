@@ -31,92 +31,49 @@ def load_daily_batch(
     events: list[dict[str, Any]],
     surveys: list[dict[str, Any]],
 ) -> None:
-    """Persist immutable source events and refresh dimensional outputs."""
+    """Persist immutable source events (Idempotent execution)."""
     event_rows = [
         (
-            event["event_id"],
-            event["chat_id"],
-            event["agent_id"],
-            event["event_type"],
-            event["event_timestamp"],
-            event["ingestion_date"],
-        )
-        for event in events
+            event["event_id"], event["chat_id"], event["agent_id"],
+            event["event_type"], event["event_timestamp"], event["ingestion_date"],
+        ) for event in events
     ]
     survey_rows = [
         (
-            survey["survey_id"],
-            survey["chat_id"],
-            survey["survey_skipped"],
-            survey["customer_input"],
-        )
-        for survey in surveys
+            survey["survey_id"], survey["chat_id"], survey["survey_skipped"], survey["customer_input"],
+        ) for survey in surveys
     ]
 
     with connection.transaction():
         with connection.cursor() as cursor:
-            # --- 1. THE IDEMPOTENT OVERRIDE ---
-            # Delete surveys linked to today's events first (to respect foreign keys)
+            # 1. Idempotent Override
             cursor.execute(
-                """
-                DELETE FROM raw.survey 
-                WHERE chat_id IN (
-                    SELECT chat_id FROM raw.raw_chat_logs 
-                    WHERE DATE(event_timestamp) = %s
-                )
-                """,
+                "DELETE FROM raw.survey WHERE chat_id IN (SELECT chat_id FROM raw.raw_chat_logs WHERE DATE(event_timestamp) = %s)",
                 (source_date,)
             )
+            cursor.execute("DELETE FROM raw.raw_chat_logs WHERE DATE(event_timestamp) = %s", (source_date,))
 
-            # Delete today's events
-            cursor.execute(
-                "DELETE FROM raw.raw_chat_logs WHERE DATE(event_timestamp) = %s",
-                (source_date,)
-            )
-
-            # --- 2. THE INSERTION ---
+            # 2. Insertion
             cursor.executemany(
-                """
-                INSERT INTO raw.raw_chat_logs (
-                    event_id,
-                    chat_id,
-                    agent_id,
-                    event_type,
-                    event_timestamp,
-                    ingestion_date
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (event_id) DO NOTHING
-                """,
+                """INSERT INTO raw.raw_chat_logs (event_id, chat_id, agent_id, event_type, event_timestamp, ingestion_date)
+                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING""",
                 event_rows,
             )
             cursor.executemany(
-                """
-                INSERT INTO raw.survey (
-                    survey_id,
-                    chat_id,
-                    survey_skipped,
-                    customer_input
-                )
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (survey_id) DO NOTHING
-                """,
+                """INSERT INTO raw.survey (survey_id, chat_id, survey_skipped, customer_input)
+                   VALUES (%s, %s, %s, %s) ON CONFLICT (survey_id) DO NOTHING""",
                 survey_rows,
             )
 
-            # Execute stored procedures to validate and populate dimensional models
-            cursor.execute("CALL raw.validate_source_data()")
-            cursor.execute("CALL mart.refresh_star_schema()")
-
-            # Log the successful batch run
+            # Log the successful daily ingestion
             cursor.execute(
-                """
-                INSERT INTO raw.batch_run_log (
-                    source_date,
-                    source_chat_count,
-                    source_event_count
-                )
-                VALUES (%s, %s, %s)
-                """,
+                "INSERT INTO raw.batch_run_log (source_date, source_chat_count, source_event_count) VALUES (%s, %s, %s)",
                 (source_date, len(surveys), len(events)),
             )
+
+def refresh_analytics_models(connection: psycopg.Connection[Any]) -> None:
+    """Run heavy aggregations and data modeling ONCE after all data is loaded."""
+    with connection.transaction():
+        with connection.cursor() as cursor:
+            cursor.execute("CALL raw.validate_source_data()")
+            cursor.execute("CALL mart.refresh_star_schema()")
