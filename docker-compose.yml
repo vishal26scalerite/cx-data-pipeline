@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: chat_dashboard_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-chat_dashboard}
+      POSTGRES_USER: ${POSTGRES_USER:-chat_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chat_admin}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - chat_dashboard_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chat_admin} -d ${POSTGRES_DB:-chat_dashboard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  pipeline:
+    build: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://chat_admin:chat_admin@postgres:5432/chat_dashboard}
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  chat_dashboard_postgres_data:
+
