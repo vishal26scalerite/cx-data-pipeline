@@ -55,6 +55,26 @@ def load_daily_batch(
 
     with connection.transaction():
         with connection.cursor() as cursor:
+            # --- 1. THE IDEMPOTENT OVERRIDE ---
+            # Delete surveys linked to today's events first (to respect foreign keys)
+            cursor.execute(
+                """
+                DELETE FROM raw.survey 
+                WHERE chat_id IN (
+                    SELECT chat_id FROM raw.raw_chat_logs 
+                    WHERE DATE(event_timestamp) = %s
+                )
+                """,
+                (source_date,)
+            )
+
+            # Delete today's events
+            cursor.execute(
+                "DELETE FROM raw.raw_chat_logs WHERE DATE(event_timestamp) = %s",
+                (source_date,)
+            )
+
+            # --- 2. THE INSERTION ---
             cursor.executemany(
                 """
                 INSERT INTO raw.raw_chat_logs (
@@ -83,8 +103,12 @@ def load_daily_batch(
                 """,
                 survey_rows,
             )
+
+            # Execute stored procedures to validate and populate dimensional models
             cursor.execute("CALL raw.validate_source_data()")
             cursor.execute("CALL mart.refresh_star_schema()")
+
+            # Log the successful batch run
             cursor.execute(
                 """
                 INSERT INTO raw.batch_run_log (
@@ -96,4 +120,3 @@ def load_daily_batch(
                 """,
                 (source_date, len(surveys), len(events)),
             )
-
