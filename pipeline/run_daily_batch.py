@@ -25,6 +25,8 @@ def main() -> None:
     parser.add_argument("--end-date", type=date.fromisoformat, help="End date for bulk generation")
 
     # NEW HACK: Fast simulation
+    parser.add_argument("--skip-backups", action="store_true",
+                        help="Skip writing JSONL files to disk to maximize speed")
     parser.add_argument("--fast-sim-days", type=int,
                         help="HACK: Quickly simulate the last N days directly to DB, skipping file I/O backups")
 

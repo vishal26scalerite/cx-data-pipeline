@@ -3,29 +3,45 @@ services:
     image: postgres:16
     container_name: chat_dashboard_postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-chat_dashboard}
-      POSTGRES_USER: ${POSTGRES_USER:-chat_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chat_admin}
+      POSTGRES_USER: chat_admin
+      POSTGRES_PASSWORD: chat_admin
+      POSTGRES_DB: chat_dashboard
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
+    # This saves the raw database data to your local machine
     volumes:
-      - chat_dashboard_postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chat_admin} -d ${POSTGRES_DB:-chat_dashboard}"]
+      test: ["CMD-SHELL", "pg_isready -U chat_admin -d chat_dashboard"]
       interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 5
 
   pipeline:
     build: .
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://chat_admin:chat_admin@postgres:5432/chat_dashboard}
-    volumes:
-      - ./data:/app/data
+      DATABASE_URL: postgresql://chat_admin:chat_admin@postgres:5432/chat_dashboard
     depends_on:
       postgres:
         condition: service_healthy
 
-volumes:
-  chat_dashboard_postgres_data:
+  metabase:
+    image: metabase/metabase:latest
+    container_name: chat_dashboard_metabase
+    ports:
+      - "3000:3000"
+    user: "1000:1000"
+    # This creates a folder in your project called 'metabase_data'
+    volumes:
+      - ./metabase_data:/metabase-data
+    # This tells Metabase to save its internal database into that new folder
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    depends_on:
+      postgres:
+        condition: service_healthy
 
+# We must declare the named volume for Postgres at the very bottom
+volumes:
+  postgres_data:

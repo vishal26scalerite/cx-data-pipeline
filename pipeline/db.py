@@ -31,7 +31,7 @@ def load_daily_batch(
     events: list[dict[str, Any]],
     surveys: list[dict[str, Any]],
 ) -> None:
-    """Persist immutable source events (Idempotent execution)."""
+    """Persist immutable source events using high-speed COPY streaming."""
     event_rows = [
         (
             event["event_id"], event["chat_id"], event["agent_id"],
@@ -46,26 +46,23 @@ def load_daily_batch(
 
     with connection.transaction():
         with connection.cursor() as cursor:
-            # 1. Idempotent Override
+            # 1. Idempotent Override (Guarantees no duplicates)
             cursor.execute(
                 "DELETE FROM raw.survey WHERE chat_id IN (SELECT chat_id FROM raw.raw_chat_logs WHERE DATE(event_timestamp) = %s)",
                 (source_date,)
             )
             cursor.execute("DELETE FROM raw.raw_chat_logs WHERE DATE(event_timestamp) = %s", (source_date,))
 
-            # 2. Insertion
-            cursor.executemany(
-                """INSERT INTO raw.raw_chat_logs (event_id, chat_id, agent_id, event_type, event_timestamp, ingestion_date)
-                   VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (event_id) DO NOTHING""",
-                event_rows,
-            )
-            cursor.executemany(
-                """INSERT INTO raw.survey (survey_id, chat_id, survey_skipped, customer_input)
-                   VALUES (%s, %s, %s, %s) ON CONFLICT (survey_id) DO NOTHING""",
-                survey_rows,
-            )
+            # 2. High-Speed COPY Insertion (Replaces standard INSERT)
+            with cursor.copy("COPY raw.raw_chat_logs (event_id, chat_id, agent_id, event_type, event_timestamp, ingestion_date) FROM STDIN") as copy_events:
+                for row in event_rows:
+                    copy_events.write_row(row)
 
-            # Log the successful daily ingestion
+            with cursor.copy("COPY raw.survey (survey_id, chat_id, survey_skipped, customer_input) FROM STDIN") as copy_surveys:
+                for row in survey_rows:
+                    copy_surveys.write_row(row)
+
+            # 3. Log the successful daily ingestion
             cursor.execute(
                 "INSERT INTO raw.batch_run_log (source_date, source_chat_count, source_event_count) VALUES (%s, %s, %s)",
                 (source_date, len(surveys), len(events)),
