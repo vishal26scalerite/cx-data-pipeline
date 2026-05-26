@@ -2,8 +2,7 @@
 
 Metabase is the free, locally hosted presentation layer for this project. It
 connects directly to the PostgreSQL star schema and reporting views, so a new
-pipeline batch is available to dashboard queries without publishing an
-extract.
+mart refresh is available to dashboard queries without publishing an extract.
 
 ## Start Metabase
 
@@ -66,8 +65,9 @@ Run another daily delivery:
 
 ```powershell
 docker compose run --rm pipeline --date 2026-05-26 --chat-count 500 --seed 20260526
+docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
-Refresh the Metabase dashboard page after the batch completes. Its cards query
-the updated PostgreSQL reporting views directly.
-
+The batch runner currently loads raw data only, so the procedure call is
+required to update reporting views. Refresh the Metabase dashboard page after
+the mart refresh completes.

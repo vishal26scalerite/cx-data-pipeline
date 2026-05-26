@@ -6,8 +6,8 @@
 | --- | --- | --- |
 | Source delivery | `data/generated/YYYY-MM-DD/*.jsonl` | Simulated daily operational extract |
 | Raw | `raw.raw_chat_logs`, `raw.survey` | Immutable event and survey records |
-| Quality gate | `raw.validate_source_data()` | SQL validation before mart refresh |
-| Dimensional mart | `mart.dim_*`, `mart.fact_chat_resolution` | Kimball star schema |
+| Quality gate | `raw.validate_source_data()` | SQL validation procedure before mart refresh |
+| Dimensional mart | `mart.dim_*`, `mart.fact_chat_resolution` | Kimball star schema populated by refresh procedure |
 | Presentation | `reporting.v_*` | Tableau live-connection views |
 
 ## Fact Grain
@@ -41,6 +41,14 @@ The generator and SQL procedure enforce the event vocabulary, event ordering,
 single assignment, fixed assigned agent, no activity after closure, valid
 inactivity closure timing, and one survey for every closed chat.
 
+The generator validation runs during source creation. The database validation
+and mart refresh procedures are implemented, but the active batch runner does
+not yet call them automatically. After ingestion, run:
+
+```powershell
+docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
+```
+
 `system_closed_chat_after_inactivity` is modeled with `agent_id = NULL`
 because it is performed by the system, while attribution still comes from the
 preceding assignment event.
@@ -49,4 +57,3 @@ The supplied survey schema has no survey timestamp. The database can prove that
 a survey belongs to a closed chat, but it cannot independently prove when the
 survey was submitted. Adding `survey_timestamp` would allow that rule to be
 fully audited in SQL.
-

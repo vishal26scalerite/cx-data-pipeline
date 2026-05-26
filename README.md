@@ -1,30 +1,34 @@
 # Customer Service Chat Analytics Dashboard Pipeline
 
 This project simulates daily customer service chat events and post-chat
-surveys, loads them into PostgreSQL, validates the operational rules in SQL,
-and transforms closed conversations into a Kimball star schema for a Tableau
-live dashboard.
+surveys, loads them into PostgreSQL, and provides SQL procedures and reporting
+views for a customer-service analytics dashboard.
+
+For a complete implementation snapshot, runbook, metrics reference, and known
+gaps, see [`docs/project_documentation.md`](docs/project_documentation.md).
 
 ## Architecture
 
 ```text
-Daily JSONL source files -> raw tables -> SQL quality gate -> Kimball mart -> reporting views -> Tableau Live
+Generated chats -> optional JSONL files -> raw tables -> SQL quality gate -> Kimball mart -> reporting views -> dashboard
 ```
 
 PostgreSQL is used because Tableau can connect to it directly and keep the
-dashboard live as new daily batches are loaded.
+dashboard live as the mart is refreshed with new daily data.
 
 ## Project Contents
 
 | Path | Description |
 | --- | --- |
 | `pipeline/generate_data.py` | Deterministic simulated chat and survey source generator |
-| `pipeline/run_daily_batch.py` | Daily generation, ingestion, validation, and mart refresh |
+| `pipeline/run_daily_batch.py` | Single-day, date-range, and fast-simulation raw ingestion runner |
 | `sql/001_raw_layer.sql` | Raw tables and source-rule quality procedure |
 | `sql/002_star_schema.sql` | Dimensions, fact table, and refresh procedure |
-| `sql/003_reporting_views.sql` | Tableau-facing views |
+| `sql/003_reporting_views.sql` | Dashboard-facing views |
+| `docs/project_documentation.md` | Current build status, operations runbook, metrics, and gaps |
 | `docs/data_model.md` | Fact grain, dimensions, SLAs, and modeling decisions |
 | `docs/tableau_dashboard.md` | Tableau live connection and dashboard layout |
+| `docs/metabase_dashboard.md` | Local Metabase connection and dashboard layout |
 
 ## Quick Start With Docker
 
@@ -37,17 +41,37 @@ docker compose run --rm pipeline --date 2026-05-25 --chat-count 500 --seed 20260
 ```
 
 The first build may download the PostgreSQL and Python container images. The
-pipeline command generates JSONL under `data/generated/2026-05-25`, inserts
-the raw records, applies SQL checks, and refreshes the mart.
+pipeline command generates JSONL under `data/generated/2026-05-25` and inserts
+the raw records. Run validation and populate the mart after ingestion:
+
+```powershell
+docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
+```
 
 Run another daily batch to add dashboard data:
 
 ```powershell
 docker compose run --rm pipeline --date 2026-05-26 --chat-count 500 --seed 20260526
+docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 The identifiers are deterministic by source date. Re-running the same date
-with the same seed is idempotent; use a new date for a new simulated delivery.
+with the same seed replaces the date's raw data without duplicate chat rows;
+the batch-run log still records each execution. Use a new date for a new
+simulated delivery.
+
+Load a range or quickly simulate recent history:
+
+```powershell
+# Load an explicit date range:
+docker compose run --rm pipeline --start-date 2026-05-01 --end-date 2026-05-25 --chat-count 500 --seed 20260501
+
+# Or simulate the most recent 30 days without JSONL files:
+docker compose run --rm pipeline --fast-sim-days 30 --chat-count 500
+```
+
+`--fast-sim-days` skips JSONL files. Run the validation and mart refresh
+command after either bulk load before using dashboard views.
 
 ## Local Python Alternative
 
@@ -59,6 +83,7 @@ python -m venv .venv
 pip install -r requirements.txt
 $env:DATABASE_URL = "postgresql://chat_admin:chat_admin@localhost:5432/chat_dashboard"
 python -m pipeline.run_daily_batch --date 2026-05-25 --chat-count 500 --seed 20260525
+docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 Generate source files without loading PostgreSQL:
@@ -99,7 +124,7 @@ Generator rule tests do not require a database:
 python -m unittest discover -s tests -v
 ```
 
-SQL validation also runs on every loaded batch through
-`raw.validate_source_data()`. A rule violation aborts the transaction before
-facts or reporting views are refreshed.
-
+SQL validation is available through `raw.validate_source_data()` and should be
+called before `mart.refresh_star_schema()` after a raw load. The active batch
+runner does not yet invoke those procedures automatically; this wiring is
+tracked in [`docs/project_documentation.md`](docs/project_documentation.md).
