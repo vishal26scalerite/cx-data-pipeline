@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS raw.raw_chat_logs (
     CONSTRAINT raw_chat_logs_event_type_ck CHECK (
         event_type IN (
             'chat_started',
+            'chat_entered_queue',
             'agent_assignment',
             'agent_responded',
             'customer_responded',
@@ -22,6 +23,7 @@ CREATE TABLE IF NOT EXISTS raw.raw_chat_logs (
     CONSTRAINT raw_chat_logs_agent_id_ck CHECK (
         (event_type IN (
             'chat_started',
+            'chat_entered_queue',
             'customer_responded',
             'customer_closed_chat',
             'system_closed_chat_after_inactivity'
@@ -35,6 +37,43 @@ CREATE TABLE IF NOT EXISTS raw.raw_chat_logs (
         ) AND agent_id IS NOT NULL)
     )
 );
+
+ALTER TABLE raw.raw_chat_logs
+    DROP CONSTRAINT IF EXISTS raw_chat_logs_event_type_ck;
+ALTER TABLE raw.raw_chat_logs
+    ADD CONSTRAINT raw_chat_logs_event_type_ck CHECK (
+        event_type IN (
+            'chat_started',
+            'chat_entered_queue',
+            'agent_assignment',
+            'agent_responded',
+            'customer_responded',
+            'chat_closed_by_agent',
+            'customer_closed_chat',
+            'chat_pushed_to_queue_due_inactivity',
+            'system_closed_chat_after_inactivity'
+        )
+    );
+
+ALTER TABLE raw.raw_chat_logs
+    DROP CONSTRAINT IF EXISTS raw_chat_logs_agent_id_ck;
+ALTER TABLE raw.raw_chat_logs
+    ADD CONSTRAINT raw_chat_logs_agent_id_ck CHECK (
+        (event_type IN (
+            'chat_started',
+            'chat_entered_queue',
+            'customer_responded',
+            'customer_closed_chat',
+            'system_closed_chat_after_inactivity'
+        ) AND agent_id IS NULL)
+        OR
+        (event_type IN (
+            'agent_assignment',
+            'agent_responded',
+            'chat_closed_by_agent',
+            'chat_pushed_to_queue_due_inactivity'
+        ) AND agent_id IS NOT NULL)
+    );
 
 CREATE INDEX IF NOT EXISTS raw_chat_logs_chat_time_idx
     ON raw.raw_chat_logs (chat_id, event_timestamp);

@@ -13,8 +13,8 @@
 ## Fact Grain
 
 `mart.fact_chat_resolution` has exactly one row per closed chat with its related
-survey. The fact supports response time, resolution time, SLA, CSAT, closure
-reason, inactivity, agent, and team analysis.
+survey. The fact supports queue wait, response time, resolution time, SLA,
+CSAT, closure reason, inactivity, agent, and team analysis.
 
 The mart refresh synchronizes this fact table to the current raw closed-chat
 source set: it upserts current facts and deletes facts for chats that no longer
@@ -33,17 +33,28 @@ exist in raw data after a source-date reload.
 
 | Measure | Definition |
 | --- | --- |
+| Queue wait time | Time from `chat_entered_queue` to `agent_assignment`; null for chats closed before assignment |
 | First response time | Time from `agent_assignment` to first `agent_responded` |
 | First response SLA | First agent response within 5 minutes of assignment |
 | Resolution time | Time from `chat_started` to closure |
 | Resolution SLA | Closure within 60 minutes of chat start |
 | CSAT | Satisfied responses divided by answered surveys |
 
+## Source Event Flow
+
+The upgraded generator models a waiting queue, active chats, and an agent
+registry with a maximum capacity of two concurrent chats per agent. Generated
+chats start with `chat_started`, enter the queue with `chat_entered_queue`, and
+are assigned only when capacity exists. A small share of queued chats can close
+before assignment.
+
 ## Enforced Source Rules
 
 The generator and SQL procedure enforce the event vocabulary, event ordering,
 single assignment, fixed assigned agent, no activity after closure, valid
-inactivity closure timing, and one survey for every closed chat.
+inactivity closure timing, and one survey for every closed chat. The generator
+also validates exactly one queue entry per chat and the two-active-chat agent
+capacity rule.
 
 The generator validation runs during source creation. The active batch runner
 calls the database validation and mart refresh procedures after all requested

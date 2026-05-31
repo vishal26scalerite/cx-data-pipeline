@@ -27,10 +27,10 @@ Use the `reporting` schema rather than querying the raw event table directly.
 
 ## Suggested Dashboard
 
-Build KPI tiles for resolved chats, average first response minutes, first
-response SLA percent, resolution SLA percent, and CSAT percent. Add a daily
-trend using `chat_date`, a support-team comparison bar chart, and a closure
-reason breakdown from the detail view.
+Build KPI tiles for resolved chats, average queue wait minutes, average first
+response minutes, first response SLA percent, resolution SLA percent, and CSAT
+percent. Add a daily trend using `chat_date`, a support-team comparison bar
+chart, and a closure reason breakdown from the detail view.
 
 Because the connection is live, Tableau reflects current fact rows after each
 successful pipeline run without an extract refresh. The batch runner validates

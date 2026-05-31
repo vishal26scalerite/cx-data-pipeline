@@ -20,7 +20,7 @@ dashboard live as the mart is refreshed with new daily data.
 
 | Path | Description |
 | --- | --- |
-| `pipeline/generate_data.py` | Deterministic simulated chat and survey source generator |
+| `pipeline/generate_data.py` | Deterministic queue/capacity chat and survey source generator |
 | `pipeline/run_daily_batch.py` | Single-day, date-range, and fast-simulation raw ingestion runner |
 | `sql/001_raw_layer.sql` | Raw tables and source-rule quality procedure |
 | `sql/002_star_schema.sql` | Dimensions, fact table, and refresh procedure |
@@ -95,7 +95,7 @@ The mart fact grain is one row per closed chat:
 
 | Table | Purpose |
 | --- | --- |
-| `mart.fact_chat_resolution` | Duration, SLA, response counts, inactivity, and CSAT flags |
+| `mart.fact_chat_resolution` | Queue wait, duration, SLA, response counts, inactivity, and CSAT flags |
 | `mart.dim_date` | Calendar reporting by chat start date |
 | `mart.dim_agent` | Simulated agent and support team |
 | `mart.dim_resolution_type` | Agent, customer, or inactivity closure |
@@ -119,6 +119,13 @@ Generator rule tests do not require a database:
 
 ```powershell
 python -m unittest discover -s tests -v
+```
+
+The PostgreSQL integration test is included in discovery, but skips when
+`psycopg` or a reachable database is unavailable. To run it with Docker:
+
+```powershell
+docker compose run --rm --entrypoint python --volume "C:\Users\ASUS\chat dashboard project:/app" pipeline -m unittest tests.test_postgres_integration -v
 ```
 
 The batch runner automatically calls `raw.validate_source_data()` before

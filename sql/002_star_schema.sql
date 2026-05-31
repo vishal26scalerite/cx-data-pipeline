@@ -40,10 +40,12 @@ CREATE TABLE IF NOT EXISTS mart.fact_chat_resolution (
     resolution_type_key INTEGER NOT NULL REFERENCES mart.dim_resolution_type (resolution_type_key),
     survey_response_key INTEGER NOT NULL REFERENCES mart.dim_survey_response (survey_response_key),
     started_at TIMESTAMP NOT NULL,
+    entered_queue_at TIMESTAMP,
     assigned_at TIMESTAMP,
     first_agent_response_at TIMESTAMP,
     closed_at TIMESTAMP NOT NULL,
     ingestion_date DATE NOT NULL,
+    queue_wait_seconds INTEGER,
     first_response_seconds INTEGER,
     resolution_seconds INTEGER NOT NULL,
     agent_response_count INTEGER NOT NULL,
@@ -52,6 +54,9 @@ CREATE TABLE IF NOT EXISTS mart.fact_chat_resolution (
     first_response_sla_met BOOLEAN,
     resolution_sla_met BOOLEAN NOT NULL,
     satisfied_flag BOOLEAN,
+    CONSTRAINT fact_chat_resolution_queue_wait_seconds_ck CHECK (
+        queue_wait_seconds IS NULL OR queue_wait_seconds >= 0
+    ),
     CONSTRAINT fact_chat_resolution_first_response_seconds_ck CHECK (
         first_response_seconds IS NULL OR first_response_seconds >= 0
     ),
@@ -62,6 +67,27 @@ CREATE INDEX IF NOT EXISTS fact_chat_resolution_date_idx
     ON mart.fact_chat_resolution (date_key);
 CREATE INDEX IF NOT EXISTS fact_chat_resolution_agent_idx
     ON mart.fact_chat_resolution (agent_key);
+
+ALTER TABLE mart.fact_chat_resolution
+    ADD COLUMN IF NOT EXISTS entered_queue_at TIMESTAMP;
+ALTER TABLE mart.fact_chat_resolution
+    ADD COLUMN IF NOT EXISTS queue_wait_seconds INTEGER;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fact_chat_resolution_queue_wait_seconds_ck'
+          AND conrelid = 'mart.fact_chat_resolution'::REGCLASS
+    ) THEN
+        ALTER TABLE mart.fact_chat_resolution
+            ADD CONSTRAINT fact_chat_resolution_queue_wait_seconds_ck CHECK (
+                queue_wait_seconds IS NULL OR queue_wait_seconds >= 0
+            );
+    END IF;
+END;
+$$;
 
 INSERT INTO mart.dim_resolution_type (resolution_code, resolution_label)
 VALUES
@@ -131,6 +157,7 @@ BEGIN
         SELECT
             chat_id,
             MIN(event_timestamp) FILTER (WHERE event_type = 'chat_started') AS started_at,
+            MIN(event_timestamp) FILTER (WHERE event_type = 'chat_entered_queue') AS entered_queue_at,
             MIN(event_timestamp) FILTER (WHERE event_type = 'agent_assignment') AS assigned_at,
             MIN(event_timestamp) FILTER (WHERE event_type = 'agent_responded') AS first_agent_response_at,
             MIN(event_timestamp) FILTER (
@@ -170,10 +197,17 @@ BEGIN
             resolution.resolution_type_key,
             survey_response.survey_response_key,
             rollup.started_at,
+            rollup.entered_queue_at,
             rollup.assigned_at,
             rollup.first_agent_response_at,
             rollup.closed_at,
             rollup.ingestion_date,
+            CASE
+                WHEN rollup.entered_queue_at IS NULL OR rollup.assigned_at IS NULL THEN NULL
+                ELSE EXTRACT(EPOCH FROM (
+                    rollup.assigned_at - rollup.entered_queue_at
+                ))::INTEGER
+            END AS queue_wait_seconds,
             CASE
                 WHEN rollup.assigned_at IS NULL OR rollup.first_agent_response_at IS NULL THEN NULL
                 ELSE EXTRACT(EPOCH FROM (
@@ -224,10 +258,12 @@ BEGIN
         resolution_type_key,
         survey_response_key,
         started_at,
+        entered_queue_at,
         assigned_at,
         first_agent_response_at,
         closed_at,
         ingestion_date,
+        queue_wait_seconds,
         first_response_seconds,
         resolution_seconds,
         agent_response_count,
@@ -244,10 +280,12 @@ BEGIN
         resolution_type_key,
         survey_response_key,
         started_at,
+        entered_queue_at,
         assigned_at,
         first_agent_response_at,
         closed_at,
         ingestion_date,
+        queue_wait_seconds,
         first_response_seconds,
         resolution_seconds,
         agent_response_count,
@@ -264,10 +302,12 @@ BEGIN
         resolution_type_key = EXCLUDED.resolution_type_key,
         survey_response_key = EXCLUDED.survey_response_key,
         started_at = EXCLUDED.started_at,
+        entered_queue_at = EXCLUDED.entered_queue_at,
         assigned_at = EXCLUDED.assigned_at,
         first_agent_response_at = EXCLUDED.first_agent_response_at,
         closed_at = EXCLUDED.closed_at,
         ingestion_date = EXCLUDED.ingestion_date,
+        queue_wait_seconds = EXCLUDED.queue_wait_seconds,
         first_response_seconds = EXCLUDED.first_response_seconds,
         resolution_seconds = EXCLUDED.resolution_seconds,
         agent_response_count = EXCLUDED.agent_response_count,

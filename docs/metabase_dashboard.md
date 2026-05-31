@@ -49,6 +49,7 @@ Create a dashboard named **Customer Service Chat Operations Dashboard** with:
 | Card | Data Source | Visualization |
 | --- | --- | --- |
 | Resolved Chats | `v_chat_kpi_summary_daily` sum of `resolved_chats` | Number |
+| Average Queue Wait | `v_chat_kpi_summary_daily` weighted or detail-view average | Number |
 | Average First Response | `v_chat_kpi_summary_daily` weighted or detail-view average | Number |
 | Resolution SLA % | `v_tableau_chat_detail` percent of `resolution_sla_met` | Number |
 | CSAT % | `v_tableau_chat_detail` percent satisfied among answered surveys | Number |

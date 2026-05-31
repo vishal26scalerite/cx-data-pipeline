@@ -1,5 +1,9 @@
 CREATE SCHEMA IF NOT EXISTS reporting;
 
+DROP VIEW IF EXISTS reporting.v_tableau_chat_detail;
+DROP VIEW IF EXISTS reporting.v_chat_kpi_summary_daily;
+DROP VIEW IF EXISTS reporting.v_agent_performance_daily;
+
 CREATE OR REPLACE VIEW reporting.v_tableau_chat_detail AS
 SELECT
     fact.chat_id,
@@ -14,9 +18,12 @@ SELECT
     resolution.resolution_label,
     survey.response_label AS survey_response,
     fact.started_at,
+    fact.entered_queue_at,
     fact.assigned_at,
     fact.first_agent_response_at,
     fact.closed_at,
+    fact.queue_wait_seconds,
+    ROUND(fact.queue_wait_seconds / 60.0, 2) AS queue_wait_minutes,
     fact.first_response_seconds,
     ROUND(fact.first_response_seconds / 60.0, 2) AS first_response_minutes,
     fact.resolution_seconds,
@@ -42,6 +49,7 @@ SELECT
     COUNT(*) AS resolved_chats,
     COUNT(*) FILTER (WHERE fact.agent_key IS NULL) AS unassigned_chats,
     COUNT(*) FILTER (WHERE fact.first_agent_response_at IS NOT NULL) AS responded_chats,
+    ROUND(AVG(fact.queue_wait_seconds) / 60.0, 2) AS avg_queue_wait_minutes,
     ROUND(AVG(fact.first_response_seconds) / 60.0, 2) AS avg_first_response_minutes,
     ROUND(AVG(fact.resolution_seconds) / 60.0, 2) AS avg_resolution_minutes,
     ROUND(
@@ -77,6 +85,7 @@ SELECT
     agent.agent_name,
     agent.support_team,
     COUNT(*) AS resolved_chats,
+    ROUND(AVG(fact.queue_wait_seconds) / 60.0, 2) AS avg_queue_wait_minutes,
     ROUND(AVG(fact.first_response_seconds) / 60.0, 2) AS avg_first_response_minutes,
     ROUND(AVG(fact.resolution_seconds) / 60.0, 2) AS avg_resolution_minutes,
     ROUND(
@@ -97,4 +106,3 @@ GROUP BY
     agent.agent_id,
     agent.agent_name,
     agent.support_team;
-
