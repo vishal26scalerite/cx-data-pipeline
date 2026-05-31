@@ -9,7 +9,7 @@ from pathlib import Path
 
 import psycopg
 
-from .db import initialize_database, load_daily_batch
+from .db import initialize_database, load_daily_batch, refresh_analytics_models
 from .generate_data import generate_daily_data, write_jsonl
 
 DEFAULT_DATABASE_URL = "postgresql://chat_admin:chat_admin@localhost:5432/chat_dashboard"
@@ -24,11 +24,10 @@ def main() -> None:
     parser.add_argument("--start-date", type=date.fromisoformat, help="Start date for bulk generation")
     parser.add_argument("--end-date", type=date.fromisoformat, help="End date for bulk generation")
 
-    # NEW HACK: Fast simulation
     parser.add_argument("--skip-backups", action="store_true",
                         help="Skip writing JSONL files to disk to maximize speed")
     parser.add_argument("--fast-sim-days", type=int,
-                        help="HACK: Quickly simulate the last N days directly to DB, skipping file I/O backups")
+                        help="Quickly simulate the last N days directly to DB, skipping file I/O backups")
 
     parser.add_argument("--chat-count", type=int, default=250)
     parser.add_argument("--seed", type=int, help="Base seed for reproducibility")
@@ -63,7 +62,7 @@ def main() -> None:
     with psycopg.connect(args.database_url) as connection:
         initialize_database(connection)
 
-        mode_text = "FAST SIMULATION HACK" if args.fast_sim_days else "Standard Generation"
+        mode_text = "Fast Simulation" if args.fast_sim_days else "Standard Generation"
         print(f"Starting pipeline ({mode_text}) for {len(dates_to_process)} days...")
 
         for index, current_date in enumerate(dates_to_process):
@@ -72,8 +71,8 @@ def main() -> None:
             # 1. Generate in memory
             events, surveys = generate_daily_data(current_date, args.chat_count, daily_seed)
 
-            # 2. Save JSONL backups (SKIPPED in fast sim mode to save I/O time)
-            if not args.fast_sim_days:
+            # 2. Save JSONL backups unless the run explicitly skips file output.
+            if not (args.fast_sim_days or args.skip_backups):
                 events_path, surveys_path = write_jsonl(
                     current_date,
                     events,
@@ -94,12 +93,16 @@ def main() -> None:
             print(
                 f"[{index + 1}/{len(dates_to_process)}] Processed {current_date.isoformat()} - Loaded {len(events)} events.")
 
+        print("Refreshing analytics models...")
+        refresh_analytics_models(connection)
+
     print("\n--- Pipeline Run Completed ---")
     print(f"Total Days Processed: {len(dates_to_process)}")
     print(f"Total Events Loaded: {total_events}")
     print(f"Total Surveys Loaded: {total_surveys}")
-    if args.fast_sim_days:
-        print("Note: Skipped JSONL backups due to --fast-sim-days flag.")
+    if args.fast_sim_days or args.skip_backups:
+        skip_reason = "--fast-sim-days flag" if args.fast_sim_days else "--skip-backups flag"
+        print(f"Note: Skipped JSONL backups due to {skip_reason}.")
     print("Tableau reporting schema refreshed: reporting")
 
 

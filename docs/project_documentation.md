@@ -12,22 +12,21 @@ exposes reporting views intended for Tableau or Metabase dashboards.
 | Capability | Status | Implementation |
 | --- | --- | --- |
 | Deterministic daily source generation | Implemented | `pipeline/generate_data.py` |
-| JSONL source-file delivery | Implemented for normal and date-range runs | `data/generated/YYYY-MM-DD/` |
+| JSONL source-file delivery | Implemented for normal and date-range runs unless `--skip-backups` is used | `data/generated/YYYY-MM-DD/` |
 | Single-day raw ingestion | Implemented | `pipeline/run_daily_batch.py` |
 | Date-range raw ingestion | Implemented | `--start-date` and `--end-date` |
 | Fast multi-day raw ingestion | Implemented | `--fast-sim-days`; skips JSONL output |
 | PostgreSQL raw schema and constraints | Implemented | `sql/001_raw_layer.sql` |
-| SQL quality procedure | Implemented, not called by the active runner | `raw.validate_source_data()` |
-| Star-schema refresh procedure | Implemented, not called by the active runner | `mart.refresh_star_schema()` |
+| SQL quality procedure | Implemented and called by the active runner | `raw.validate_source_data()` |
+| Star-schema refresh procedure | Implemented and called by the active runner | `mart.refresh_star_schema()` |
 | Reporting views | Implemented; populated after a mart refresh | `sql/003_reporting_views.sql` |
 | Tableau dashboard design | Documented | `docs/tableau_dashboard.md` |
 | Metabase local dashboard setup | Documented and containerized | `docs/metabase_dashboard.md` |
-| Generator unit tests | Implemented | `tests/test_generate_data.py` |
+| Unit tests | Implemented | `tests/test_generate_data.py`, `tests/test_run_daily_batch.py`, `tests/test_star_schema_sql.py` |
 
-The active batch runner currently completes generation and raw ingestion only.
-It prints that the reporting schema was refreshed, but does not call
-`refresh_analytics_models()`. Until that is wired into the runner, run the SQL
-validation and mart refresh procedures after loading data.
+The active batch runner generates source rows, loads raw data, validates the
+loaded source contract, and refreshes the mart once after all requested dates
+are processed.
 
 ## Architecture
 
@@ -77,6 +76,8 @@ reporting views
 | `docs/tableau_dashboard.md` | Tableau connection and dashboard guidance |
 | `docs/metabase_dashboard.md` | Local Metabase deployment and dashboard guidance |
 | `tests/test_generate_data.py` | Generator and JSONL unit tests |
+| `tests/test_run_daily_batch.py` | Batch runner orchestration unit tests |
+| `tests/test_star_schema_sql.py` | Mart refresh SQL regression tests |
 
 ## Data Generation
 
@@ -107,9 +108,9 @@ data/generated/YYYY-MM-DD/chat_logs.jsonl
 data/generated/YYYY-MM-DD/surveys.jsonl
 ```
 
-`--fast-sim-days` bypasses these JSONL files and loads in-memory rows directly
-into PostgreSQL. The accepted `--skip-backups` option is not currently used by
-the implementation.
+`--skip-backups` bypasses these JSONL files for single-day and date-range runs.
+`--fast-sim-days` also bypasses JSONL files and loads in-memory rows directly
+into PostgreSQL.
 
 ## Database Model
 
@@ -137,6 +138,10 @@ The fact grain is one row per closed chat with its linked survey.
 | `mart.dim_resolution_type` | Closure classifications |
 | `mart.dim_survey_response` | Satisfaction, non-response, and skipped survey classifications |
 
+The refresh procedure synchronizes the fact table to the current raw
+closed-chat set. Replacing a source date with fewer chats removes facts for
+chats that are no longer present in raw data.
+
 ### Reporting Views
 
 | View | Intended Use |
@@ -159,8 +164,9 @@ The fact grain is one row per closed chat with its linked survey.
 The Python generator validates its own output before files or database rows are
 created. PostgreSQL also includes a deeper validation procedure for event
 ordering, agent assignment consistency, inactivity timing, closure behavior,
-and closed-chat-to-survey matching. That database procedure must currently be
-called explicitly after ingestion.
+and closed-chat-to-survey matching. The batch runner calls that procedure
+before refreshing the mart; call it manually only when loading raw data outside
+the runner.
 
 ## Runbook
 
@@ -177,14 +183,12 @@ called explicitly after ingestion.
 docker compose up -d postgres
 docker compose build pipeline
 docker compose run --rm pipeline --date 2026-05-25 --chat-count 500 --seed 20260525
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 ### Load a Date Range
 
 ```powershell
 docker compose run --rm pipeline --start-date 2026-05-01 --end-date 2026-05-25 --chat-count 500 --seed 20260501
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 ### Generate Fast Simulation History
@@ -194,7 +198,6 @@ date and skips daily JSONL output.
 
 ```powershell
 docker compose run --rm pipeline --fast-sim-days 30 --chat-count 500
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 ### Run With Local Python
@@ -205,7 +208,6 @@ python -m venv .venv
 pip install -r requirements.txt
 $env:DATABASE_URL = "postgresql://chat_admin:chat_admin@localhost:5432/chat_dashboard"
 python -m pipeline.run_daily_batch --date 2026-05-25 --chat-count 500 --seed 20260525
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 ## Dashboard Access
@@ -252,10 +254,6 @@ docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "SELECT COU
 
 | Gap | Effect | Recommended Completion |
 | --- | --- | --- |
-| `refresh_analytics_models()` is not called in `run_daily_batch.py` | Batch loads do not automatically validate or populate dashboard facts | Call it once after all requested dates are loaded |
-| Runner prints a reporting refresh confirmation before doing a refresh | Console output may imply dashboard data is current when it is not | Print the message only after refresh succeeds |
-| `--skip-backups` is parsed but unused | The option does not change normal-run output | Wire it to the JSONL-write condition or remove it |
 | `pipeline/run_daily_batch - Copy.py` remains in the repository | Two batch scripts can cause confusion | Remove or archive it after confirming it is no longer needed |
-| Mart refresh only upserts facts after a raw date is replaced | Reloading a date with fewer chats can leave stale fact rows in dashboards | Delete/rebuild affected fact rows or implement a full synchronization step |
-| Tests cover generation only | Loader, SQL validation, and mart/reporting behavior are untested | Add PostgreSQL-backed integration tests |
+| Tests cover generation, runner orchestration, and SQL refresh regression only | Loader, SQL validation, and mart/reporting behavior are untested | Add PostgreSQL-backed integration tests |
 | Survey rows do not include a submission timestamp | Survey-after-closure timing cannot be audited | Add `survey_timestamp` if that rule is required |

@@ -41,18 +41,13 @@ docker compose run --rm pipeline --date 2026-05-25 --chat-count 500 --seed 20260
 ```
 
 The first build may download the PostgreSQL and Python container images. The
-pipeline command generates JSONL under `data/generated/2026-05-25` and inserts
-the raw records. Run validation and populate the mart after ingestion:
-
-```powershell
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
-```
+pipeline command generates JSONL under `data/generated/2026-05-25`, inserts
+the raw records, validates the source data, and refreshes the reporting mart.
 
 Run another daily batch to add dashboard data:
 
 ```powershell
 docker compose run --rm pipeline --date 2026-05-26 --chat-count 500 --seed 20260526
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 The identifiers are deterministic by source date. Re-running the same date
@@ -66,12 +61,15 @@ Load a range or quickly simulate recent history:
 # Load an explicit date range:
 docker compose run --rm pipeline --start-date 2026-05-01 --end-date 2026-05-25 --chat-count 500 --seed 20260501
 
+# Or load without writing JSONL files:
+docker compose run --rm pipeline --start-date 2026-05-01 --end-date 2026-05-25 --chat-count 500 --seed 20260501 --skip-backups
+
 # Or simulate the most recent 30 days without JSONL files:
 docker compose run --rm pipeline --fast-sim-days 30 --chat-count 500
 ```
 
-`--fast-sim-days` skips JSONL files. Run the validation and mart refresh
-command after either bulk load before using dashboard views.
+`--skip-backups` and `--fast-sim-days` skip JSONL files. The runner validates
+and refreshes the mart once after all requested dates are loaded.
 
 ## Local Python Alternative
 
@@ -83,7 +81,6 @@ python -m venv .venv
 pip install -r requirements.txt
 $env:DATABASE_URL = "postgresql://chat_admin:chat_admin@localhost:5432/chat_dashboard"
 python -m pipeline.run_daily_batch --date 2026-05-25 --chat-count 500 --seed 20260525
-docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"
 ```
 
 Generate source files without loading PostgreSQL:
@@ -124,7 +121,6 @@ Generator rule tests do not require a database:
 python -m unittest discover -s tests -v
 ```
 
-SQL validation is available through `raw.validate_source_data()` and should be
-called before `mart.refresh_star_schema()` after a raw load. The active batch
-runner does not yet invoke those procedures automatically; this wiring is
-tracked in [`docs/project_documentation.md`](docs/project_documentation.md).
+The batch runner automatically calls `raw.validate_source_data()` before
+`mart.refresh_star_schema()`. If you load raw data outside the runner, call
+those procedures manually before using the dashboard views.

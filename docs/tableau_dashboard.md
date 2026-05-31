@@ -32,8 +32,6 @@ response SLA percent, resolution SLA percent, and CSAT percent. Add a daily
 trend using `chat_date`, a support-team comparison bar chart, and a closure
 reason breakdown from the detail view.
 
-Because the connection is live, Tableau reflects new fact rows after each
-successful mart refresh without an extract refresh. The current batch runner
-loads raw data only; execute `CALL raw.validate_source_data();` followed by
-`CALL mart.refresh_star_schema();` before expecting newly loaded rows in the
-dashboard.
+Because the connection is live, Tableau reflects current fact rows after each
+successful pipeline run without an extract refresh. The batch runner validates
+raw data and refreshes the mart automatically.

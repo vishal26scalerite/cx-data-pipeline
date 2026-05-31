@@ -16,6 +16,10 @@
 survey. The fact supports response time, resolution time, SLA, CSAT, closure
 reason, inactivity, agent, and team analysis.
 
+The mart refresh synchronizes this fact table to the current raw closed-chat
+source set: it upserts current facts and deletes facts for chats that no longer
+exist in raw data after a source-date reload.
+
 ## Dimensions
 
 | Dimension | Key | Description |
@@ -41,9 +45,9 @@ The generator and SQL procedure enforce the event vocabulary, event ordering,
 single assignment, fixed assigned agent, no activity after closure, valid
 inactivity closure timing, and one survey for every closed chat.
 
-The generator validation runs during source creation. The database validation
-and mart refresh procedures are implemented, but the active batch runner does
-not yet call them automatically. After ingestion, run:
+The generator validation runs during source creation. The active batch runner
+calls the database validation and mart refresh procedures after all requested
+dates are loaded. If raw data is loaded outside the runner, call:
 
 ```powershell
 docker compose exec postgres psql -U chat_admin -d chat_dashboard -c "CALL raw.validate_source_data(); CALL mart.refresh_star_schema();"

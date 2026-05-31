@@ -207,6 +207,15 @@ BEGIN
               WHEN survey.customer_input IS NULL THEN 'no_response'
               ELSE survey.customer_input
           END
+    ),
+    deleted_stale_facts AS (
+        DELETE FROM mart.fact_chat_resolution fact
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM fact_source source
+            WHERE source.chat_id = fact.chat_id
+        )
+        RETURNING fact.chat_id
     )
     INSERT INTO mart.fact_chat_resolution (
         chat_id,
@@ -269,4 +278,3 @@ BEGIN
         satisfied_flag = EXCLUDED.satisfied_flag;
 END;
 $$;
-
